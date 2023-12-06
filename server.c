@@ -52,9 +52,49 @@ int main() {
     FILE *fp = fopen("output.txt", "wb");
 
     // TODO: Receive file from the client and save it as output.txt
+    ssize_t bytes_recv;
+    char collected_segments[2048][PAYLOAD_SIZE];
+    int received_flags[2048] = {0};
+    int num_collected = 0;
+    int final_packet_size = 0;
+    while(1){
+        bytes_recv = recvfrom(listen_sockfd, &buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr_from, &addr_size);
+        /*printf("Received %zd bytes:\n", bytes_recv);
+                for (size_t i = 0; i < PAYLOAD_SIZE; ++i) {
+                    printf("%c", buffer.payload[i]);
+                }
+                printf("\n");
+         */
+        if (!received_flags[buffer.seqnum]) {
+                    // Copy the payload content to the collected_segments array
+                    memcpy(collected_segments[buffer.seqnum], buffer.payload, buffer.length);
+                    received_flags[buffer.seqnum] = 1;
+                }
+        
+        if (buffer.seqnum > num_collected)
+            num_collected = buffer.seqnum;
+        
+        if (expected_seq_num == buffer.seqnum) {
+            while (received_flags[expected_seq_num] == 1)
+                expected_seq_num++;
+        }
 
+        if (buffer.last == 1 && expected_seq_num - 1 == buffer.seqnum) {
+            final_packet_size = buffer.length;
+                    break;
+                }
+        build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 1, "0");
+        sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
+        //printRecv(&buffer);
+    }
     
+    for (int i = 0; i < num_collected; i++) {
+            fwrite(collected_segments[i], 1, PAYLOAD_SIZE, fp);
+        }
 
+    if (final_packet_size > 0)
+        fwrite(collected_segments[num_collected], 1, final_packet_size, fp);
+    
     fclose(fp);
     close(listen_sockfd);
     close(send_sockfd);
