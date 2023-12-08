@@ -53,10 +53,15 @@ int main() {
 
     // TODO: Receive file from the client and save it as output.txt
     ssize_t bytes_recv;
-    char collected_segments[2048][PAYLOAD_SIZE];
-    int received_flags[2048] = {0};
+    char collected_segments[8000][PAYLOAD_SIZE];
+    int received_flags[8000] = {0};
     int num_collected = 0;
     int final_packet_size = 0;
+    
+    struct timeval timeout;
+    timeout.tv_sec = TIMEOUT;
+    timeout.tv_usec = 0;
+    
     while(1){
         bytes_recv = recvfrom(listen_sockfd, &buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr_from, &addr_size);
         /*printf("Received %zd bytes:\n", bytes_recv);
@@ -64,7 +69,32 @@ int main() {
                     printf("%c", buffer.payload[i]);
                 }
                 printf("\n");
-         */
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(listen_sockfd, &read_fds);
+
+        int select_result = select(listen_sockfd + 1, &read_fds, NULL, NULL, &timeout);
+        if (select_result == -1) {
+                    perror("Error in select");
+                    fclose(fp);
+                    close(listen_sockfd);
+                    close(send_sockfd);
+                    return 1;
+        }
+        else if (select_result == 0) {
+            printf("Timeout occurred. Retransmitting packet: %d\n", expected_seq_num);
+            build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 1, "0");
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
+            continue;
+        }
+        if (buffer.seqnum < expected_seq_num && !(buffer.last == 1 && expected_seq_num - 1 == buffer.seqnum)){
+            build_packet(&ack_pkt, 0, expected_seq_num, 0, 1, 1, "0");
+            sendto(send_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&client_addr_to, addr_size);
+            continue;
+        }         */
+
+
+        
         if (!received_flags[buffer.seqnum]) {
                     // Copy the payload content to the collected_segments array
                     memcpy(collected_segments[buffer.seqnum], buffer.payload, buffer.length);

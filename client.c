@@ -94,9 +94,13 @@ int main(int argc, char *argv[]) {
     }
     close(fp);
     
+    //struct timeval timeout;
+    //timeout.tv_sec = TIMEOUT;
+    //timeout.tv_usec = 0;
+    
     struct timeval timeout;
-    timeout.tv_sec = TIMEOUT;
-    timeout.tv_usec = 0;
+    timeout.tv_sec = (long)TIMEOUT;
+    timeout.tv_usec = (long)((TIMEOUT - (long)TIMEOUT) * 1e6);
     
     //for (size_t i = 0; i < PAYLOAD_SIZE; ++i) {
     //    printf("%c", segments[1].payload[i]);
@@ -151,50 +155,56 @@ int main(int argc, char *argv[]) {
                     return 1;
         }
         else if (select_result == 0) {
-            printf("Timeout occurred. Retransmitting packet: %d\n", seq_num);
+            //printf("Timeout occurred. Retransmitting packet: %d\n", seq_num);
             if (cwnd/2 > 2)
                 ssthresh = cwnd/2;
             else
                 ssthresh = 2;
             cwnd = 1;
-            in_transit = 0; //possibly decrement by more for better efficiency
+            in_transit = 0;
+            timeout.tv_sec = (long)TIMEOUT;
+            timeout.tv_usec = (long)((TIMEOUT - (long)TIMEOUT) * 1e6);
             continue;
         }
         bytes_recv = recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, (struct sockaddr *)&server_addr_from, &addr_size);
-        printf("sequence number: %d - ack number: %d\n", seq_num, ack_pkt.acknum);
-        if (ack_pkt.acknum != curr_ack){
-            if (fr_phase == 1){
-                cwnd = ssthresh;
-                fr_phase = 0;
-            }
-            else{
-                if ((int)cwnd <= ssthresh) {
-                    cwnd += (ack_pkt.acknum - curr_ack); //possible this stretches slow start past the cwnd <= ssthresh condition
+        if (bytes_recv > 0){
+            timeout.tv_sec = (long)TIMEOUT;
+            timeout.tv_usec = (long)((TIMEOUT - (long)TIMEOUT) * 1e6);
+            //printf("sequence number: %d - ack number: %d\n", seq_num, ack_pkt.acknum);
+            if (ack_pkt.acknum != curr_ack){
+                if (fr_phase == 1){
+                    cwnd = ssthresh;
+                    fr_phase = 0;
                 }
-                else {
-                    cwnd += (float)(ack_pkt.acknum - curr_ack)/cwnd;
+                else{
+                    if ((int)cwnd <= ssthresh) {
+                        cwnd += (ack_pkt.acknum - curr_ack); //possible this stretches slow start past the cwnd <= ssthresh condition
+                    }
+                    else {
+                        cwnd += (float)(ack_pkt.acknum - curr_ack)/cwnd;
+                    }
                 }
+                in_transit -= (ack_pkt.acknum - curr_ack);
+                curr_ack = ack_pkt.acknum;
+                dup_ack = 0;
             }
-            in_transit -= (ack_pkt.acknum - curr_ack);
-            curr_ack = ack_pkt.acknum;
-            dup_ack = 0;
-        }
-        else
-            dup_ack++;
-        seq_num = ack_pkt.acknum;
-        if (dup_ack == 3) {
-            fr_phase = 1;
-            if (cwnd/2 > 2)
-                ssthresh = cwnd/2;
             else
-                ssthresh = 2;
-            cwnd = ssthresh + 3;
-            sendto(send_sockfd, &segments[seq_num], sizeof(segments[seq_num]), 0, (struct sockaddr *)&server_addr_to, addr_size);
+                dup_ack++;
+            seq_num = ack_pkt.acknum;
+            if (dup_ack == 3) {
+                fr_phase = 1;
+                if (cwnd/2 > 2)
+                    ssthresh = cwnd/2;
+                else
+                    ssthresh = 2;
+                cwnd = ssthresh + 3;
+                sendto(send_sockfd, &segments[seq_num], sizeof(segments[seq_num]), 0, (struct sockaddr *)&server_addr_to, addr_size);
+            }
+            if (dup_ack > 3){
+                //cwnd++;
+                cwnd = cwnd/2;
+            }
         }
-        if (dup_ack > 3){
-            cwnd++;
-        }
-            
         /*if (ack_pkt.acknum == seq_num + 1) {
             printf("Received acknowledgment for sequence number %hu\n", seq_num);
             seq_num = ack_pkt.acknum;
